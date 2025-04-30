@@ -4,22 +4,21 @@ import urllib.request
 import html.parser
 import re
 
-USER_AGENT = 'bw browser'
-
 RMSP = re.compile(r'\s+')
+
+def rmsp(s):
+    return RMSP.sub(' ', s)
 
 IMMED_TAGS = {
     'meta', 'hr',
 }
 
-def rmsp(s):
-    return RMSP.sub(' ', s)
-
 class Element:
 
-    def __init__(self, tag, attrs):
+    def __init__(self, tag, attrs, finish=False):
         self.tag = tag
         self.attrs = attrs
+        self.finish = finish
         self.children = []
         return
 
@@ -27,6 +26,7 @@ class Element:
         return f'<{self.__class__.__name__} tag={self.tag} attrs={self.attrs} children={len(self.children)}>'
 
     def append(self, element):
+        assert not self.finish
         if isinstance(element, str) and self.children and isinstance(self.children[-1], str):
             self.children[-1] += element
         else:
@@ -72,20 +72,22 @@ class DOMParser(html.parser.HTMLParser):
         if tag in IMMED_TAGS: return
         while self._stack:
             cur = self._cur
+            cur.finish = True
             self._cur = self._stack.pop()
             if cur.tag == tag: break
         return
 
     def handle_startendtag(self, tag, attrs):
         #print(f'startend: {tag} {attrs}')
-        self._cur.append(Element(tag, dict(attrs)))
+        self._cur.append(Element(tag, dict(attrs), finish=True))
         return
 
 def main(argv):
+    user_agent = 'lofi browser'
     args = argv[1:]
     url = args.pop(0)
     opener = urllib.request.FancyURLopener()
-    opener.addheader('User-Agent', USER_AGENT)
+    opener.addheader('User-Agent', user_agent)
     fp = opener.open(url)
     parser = DOMParser()
     for line in fp:
