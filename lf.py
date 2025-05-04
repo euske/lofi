@@ -3,11 +3,10 @@ import sys
 import urllib.request
 import html.parser
 import re
-import ctypes
 
-LIBC = ctypes.cdll.LoadLibrary('libc.so.6')
-def wcwidth(c):
-    return LIBC.wcwidth(ord(c))
+WIDE = re.compile('[\u1100-\u11ff\u231a-\u231b\u2329-\u232a\u23e9-\u23ec\u23f0\u23f3\u25fd-\u25fe\u2614-\u2615\u2630-\u2637\u2648-\u2653\u267f\u268a-\u268f\u2693\u26a1\u26aa-\u26ab\u26bd-\u26be\u26c4-\u26c5\u26ce\u26d4\u26ea\u26f2-\u26f3\u26f5\u26fa\u26fd\u2705\u270a-\u270b\u2728\u274c\u274e\u2753-\u2755\u2757\u2795-\u2797\u27b0\u27bf\u2b1b-\u2b1c\u2b50\u2b55\u2e80-\u303e\u3041-\ua4cf\ua960-\ua982\uac00-\udfff\uf900-\ufaff\ufe10-\ufe6f\uff01-\uff60\uffe0-\uffe7]')
+def iswide(c):
+    return WIDE.match(c)
 
 RMSP = re.compile(r'\s+')
 
@@ -159,7 +158,7 @@ def main(argv):
             w = 0
             i0 = 0
             for (i,c) in enumerate(line):
-                wc = wcwidth(c)
+                wc = 2 if iswide(c) else 1
                 if width < w+wc:
                     rows.append(line[i0:i])
                     w = 0
