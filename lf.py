@@ -16,6 +16,11 @@ def rmsp(s):
 
 TAGS_IMMED = {
     'meta', 'link', 'hr', 'br', 'input',
+    'img', 'object',
+}
+
+TAGS_AUTOCLOSE = {
+    'p', 'li', 'dt', 'dd', 'th', 'td',
 }
 
 TAGS_IGNORE = {
@@ -66,43 +71,52 @@ class DOMParser(html.parser.HTMLParser):
 
     def __init__(self):
         html.parser.HTMLParser.__init__(self)
-        self._cur = Element('root', {})
-        self._stack = []
+        self._stack = [ Element('root', {}) ]
         return
 
     def close(self):
         html.parser.HTMLParser.close(self)
         while self._stack:
-            self._cur = self._stack.pop()
-        return self._cur
+            cur = self._stack.pop()
+        return cur
+
+    def close_tag(self, tag):
+        #print('close_tag', tag, [ e.tag for e in self._stack ])
+        i = len(self._stack)
+        while 0 < i:
+            i -= 1
+            if self._stack[i].tag == tag: break
+        else:
+            return
+        for e in self._stack[i:]:
+            e.finish = True
+        self._stack = self._stack[:i]
+        return
 
     def handle_data(self, data):
         #print(f'data: {data!r}')
-        self._cur.append(data)
+        self._stack[-1].append(data)
         return
 
     def handle_starttag(self, tag, attrs):
         #print(f'start: {tag} {attrs}')
+        if tag in TAGS_AUTOCLOSE:
+            self.close_tag(tag)
         cur = Element(tag, dict(attrs))
-        self._cur.append(cur)
+        self._stack[-1].append(cur)
         if tag not in TAGS_IMMED:
-            self._stack.append(self._cur)
-            self._cur = cur
+            self._stack.append(cur)
         return
 
     def handle_endtag(self, tag):
         #print(f'end: {tag}')
         if tag in TAGS_IMMED: return
-        while self._stack:
-            cur = self._cur
-            cur.finish = True
-            self._cur = self._stack.pop()
-            if cur.tag == tag: break
+        self.close_tag(tag)
         return
 
     def handle_startendtag(self, tag, attrs):
         #print(f'startend: {tag} {attrs}')
-        self._cur.append(Element(tag, dict(attrs), finish=True))
+        self._stack[-1].append(Element(tag, dict(attrs), finish=True))
         return
 
 def main(argv):
@@ -131,7 +145,7 @@ def main(argv):
             else:
                 text = c.strip()
                 if text:
-                    children.append(text)
+                    children.append(rmsp(text))
         if not children: return None
         if e.tag in TAGS_VISUAL and len(children) == 1:
             return children[0]
@@ -142,7 +156,6 @@ def main(argv):
     def print_fold(lines, indent, width):
         rows = []
         for line in lines:
-            line = rmsp(line)
             w = 0
             i0 = 0
             for (i,c) in enumerate(line):
