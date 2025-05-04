@@ -18,7 +18,7 @@ TAGS_IMMED = {
     'img', 'object',
 }
 
-TAGS_AUTOCLOSE = {
+TAGS_PARAGRAPH = {
     'p', 'li', 'dt', 'dd', 'th', 'td',
 }
 
@@ -79,12 +79,12 @@ class DOMParser(html.parser.HTMLParser):
             cur = self._stack.pop()
         return cur
 
-    def close_tag(self, tag):
+    def close_tag(self, tags):
         #print('close_tag', tag, [ e.tag for e in self._stack ])
         i = len(self._stack)
         while 0 < i:
             i -= 1
-            if self._stack[i].tag == tag: break
+            if self._stack[i].tag in tags: break
         else:
             return
         for e in self._stack[i:]:
@@ -99,8 +99,8 @@ class DOMParser(html.parser.HTMLParser):
 
     def handle_starttag(self, tag, attrs):
         #print(f'start: {tag} {attrs}')
-        if tag in TAGS_AUTOCLOSE:
-            self.close_tag(tag)
+        if tag in TAGS_PARAGRAPH:
+            self.close_tag(TAGS_PARAGRAPH)
         cur = Element(tag, dict(attrs))
         self._stack[-1].append(cur)
         if tag not in TAGS_IMMED:
@@ -110,7 +110,7 @@ class DOMParser(html.parser.HTMLParser):
     def handle_endtag(self, tag):
         #print(f'end: {tag}')
         if tag in TAGS_IMMED: return
-        self.close_tag(tag)
+        self.close_tag({tag})
         return
 
     def handle_startendtag(self, tag, attrs):
