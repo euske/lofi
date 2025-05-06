@@ -8,8 +8,14 @@ WIDE = re.compile('[\u1100-\u11ff\u231a-\u231b\u2329-\u232a\u23e9-\u23ec\u23f0\u
 def iswide(c):
     return WIDE.match(c)
 
-RMSP = re.compile(r'\s+')
+PAREN_OPEN = '[({"\'「『［（｛【”’'
+PAREN_CLOSE = '])}"\'」』］）｝】”’'
+PUNCT = '.,:;!?、。：；！？'
+TOKEN = re.compile(fr'[{PAREN_OPEN}]*\w+[{PAREN_CLOSE}{PUNCT}]*\s*|\S')
+def tokenize(s):
+    return [ m.group() for m in TOKEN.finditer(s) ]
 
+RMSP = re.compile(r'\s+')
 def rmsp(s):
     return RMSP.sub(' ', s)
 
@@ -24,6 +30,13 @@ TAGS_PARAGRAPH = {
 
 TAGS_IGNORE = {
     'script', 'style',
+}
+
+TAGS_INLINE = {
+    'a', 'abbr', 'b', 'bdi', 'bdo',
+    'cite', 'code', 'em', 'i', 'kbd',
+    'mark', 'q', 'ruby', 's', 'small',
+    'strong', 'sub', 'sup', 'tt', 'u',
 }
 
 TAGS_VISUAL = {
@@ -152,22 +165,21 @@ def main(argv):
             return '\n'
         return Content(e, children)
 
-    def print_fold(lines, indent, width):
+    def fold_lines(lines, width):
         rows = []
         for line in lines:
             w = 0
-            i0 = 0
-            for (i,c) in enumerate(line):
-                wc = 2 if iswide(c) else 1
+            i0 = i1 = 0
+            for token in tokenize(line):
+                wc = sum( 2 if iswide(c) else 1 for c in token )
                 if width < w+wc:
-                    rows.append(line[i0:i])
+                    rows.append(line[i0:i1])
                     w = 0
-                    i0 = i
+                    i0 = i1
                 w += wc
+                i1 += len(token)
             rows.append(line[i0:])
-        for row in rows:
-            print(' '*indent + row)
-        return
+        return rows
 
     def display(e, indent=0, bol=True):
         if isinstance(e, Content):
@@ -183,7 +195,8 @@ def main(argv):
                     display(c, indent, True)
         else:
             lines = e.split('\n')
-            print_fold(lines, indent, max_width - indent)
+            for row in fold_lines(lines, max_width-indent):
+                print(' '*indent + row)
         return
 
     content = convert(root)
