@@ -1,6 +1,6 @@
 # Lofi
 
-A text web browser.
+A lightweight html viewer/browser.
 
 ## Goals
 
@@ -12,3 +12,4 @@ Be able to browse the following sites:
 - github.com
 - news.ycombinator.com
 - reddit.com
+- API docs (Python, Java, etc.)
