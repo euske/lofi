@@ -8,9 +8,9 @@ WIDE = re.compile('[\u1100-\u11ff\u231a-\u231b\u2329-\u232a\u23e9-\u23ec\u23f0\u
 def iswide(c):
     return WIDE.match(c)
 
-PAREN_OPEN = '[({"\'「『［（｛【”’'
-PAREN_CLOSE = '])}"\'」』］）｝】”’'
-PUNCT = '.,:;!?、。：；！？'
+PAREN_OPEN = re.escape('[({"\'「『［（｛【”’')
+PAREN_CLOSE = re.escape('])}"\'」』］）｝】”’')
+PUNCT = re.escape('-.,:;!?、。：；！？')
 TOKEN = re.compile(fr'[{PAREN_OPEN}]*\w+[{PAREN_CLOSE}{PUNCT}]*\s*|\S')
 def tokenize(s):
     return [ m.group() for m in TOKEN.finditer(s) ]
