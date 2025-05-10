@@ -39,7 +39,7 @@ TAGS_INLINE = {
     'strong', 'sub', 'sup', 'tt', 'u',
 }
 
-TAGS_VISUAL = {
+TAGS_TRANSPARENT = {
     'div', 'span',
 }
 
@@ -77,7 +77,6 @@ class Content:
         self.element = element
         self.children = children
         return
-
 
 class DOMParser(html.parser.HTMLParser):
 
@@ -144,26 +143,28 @@ def main(argv):
         parser.feed(line.decode('utf-8'))
     root = parser.close()
 
-    def convert(e):
+    def convert(e, context=()):
         assert isinstance(e, Element)
-        if e.tag in TAGS_IGNORE: return None
-        if e.tag == 'input' and e.get('type') == 'hidden': return None
+        if e.tag in TAGS_IGNORE: return []
+        if e.tag == 'input' and e.get('type') == 'hidden': return []
+        if e.tag == 'br': return [(context, '\n')]
+        if e.tag in TAGS_INLINE:
+            context = context + (e,)
         children = []
         for c in e.children:
             if isinstance(c, Element):
-                content = convert(c)
-                if content is not None:
-                    children.append(content)
+                content = convert(c, context)
+                children.extend(content)
             else:
                 text = c.strip()
                 if text:
-                    children.append(rmsp(text))
-        if not children: return None
-        if e.tag in TAGS_VISUAL and len(children) == 1:
-            return children[0]
-        if e.tag == 'br':
-            return '\n'
-        return Content(e, children)
+                    children.append((context, rmsp(text)))
+        if not children: return []
+        if e.tag in TAGS_TRANSPARENT and len(children) == 1:
+            return [children[0]]
+        if e.tag in TAGS_INLINE:
+            return children
+        return [(context, Content(e, children))]
 
     def fold_lines(lines, width):
         rows = []
@@ -181,7 +182,8 @@ def main(argv):
             rows.append(line[i0:])
         return rows
 
-    def display(e, indent=0, bol=True):
+    def display(c, indent=0, bol=True):
+        (context, e) = c
         if isinstance(e, Content):
             if bol:
                 print(' '*indent, end='')
@@ -191,16 +193,18 @@ def main(argv):
                 display(e.children[0], indent, False)
             else:
                 print(f'<{e.element.tag}>:')
-                for c in e.children:
-                    display(c, indent, True)
+                for cc in e.children:
+                    display(cc, indent, True)
         else:
+            assert isinstance(e, str)
             lines = e.split('\n')
             for row in fold_lines(lines, max_width-indent):
                 print(' '*indent + row)
         return
 
     content = convert(root)
-    display(content)
+    assert len(content) == 1
+    display(content[0])
     return 0
 
 if __name__ == '__main__': sys.exit(main(sys.argv))
