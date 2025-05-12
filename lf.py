@@ -8,16 +8,76 @@ WIDE = re.compile('[\u1100-\u11ff\u231a-\u231b\u2329-\u232a\u23e9-\u23ec\u23f0\u
 def iswide(c):
     return WIDE.match(c)
 
-PAREN_OPEN = re.escape('[({"\'「『［（｛【”’')
-PAREN_CLOSE = re.escape('])}"\'」』］）｝】”’')
-PUNCT = re.escape('-.,:;!?、。：；！？')
-TOKEN = re.compile(fr'[{PAREN_OPEN}]*\w+[{PAREN_CLOSE}{PUNCT}]*\s*|\S')
-def tokenize(s):
-    return [ m.group() for m in TOKEN.finditer(s) ]
+class Tokenizer:
 
-RMSP = re.compile(r'\s+')
-def rmsp(s):
-    return RMSP.sub(' ', s)
+    PAREN_OPEN = '[({"\'「『［（｛【”’'
+    PAREN_CLOSE = '])}"\'」』］）｝】”’'
+    PUNCT = '-.,:;!?、。：；！？'
+
+    def __init__(self):
+        return
+
+    def feed(self, s):
+        self.seq = s
+        self.tokens = []
+        self.tokenstart = 0
+        (i,state) = (0, self.start)
+        while i < len(s):
+            (i, state) = state(i, s[i])
+        self.endtoken(len(s))
+        return self.tokens
+
+    def endtoken(self, i):
+        if self.tokenstart < i:
+            token = self.seq[self.tokenstart:i]
+            if isinstance(token, list):
+                self.tokens.extend(token)
+            else:
+                self.tokens.append(token)
+            self.tokenstart = i
+        return
+
+    def start(self, i, c):
+        if isinstance(c, str) and c in self.PAREN_OPEN:
+            return (i, self.paren_open)
+        elif isinstance(c, str) and c.isspace():
+            return (i, self.blank)
+        elif isinstance(c, str) and c.isalnum():
+            return (i, self.word)
+        else:
+            self.endtoken(i)
+            self.endtoken(i+1)
+            return (i+1, self.start)
+
+    def paren_open(self, i, c):
+        if isinstance(c, str) and c in self.PAREN_OPEN:
+            return (i+1, self.paren_open)
+        else:
+            return (i, self.word)
+
+    def word(self, i, c):
+        if isinstance(c, str) and c.isalnum():
+            if iswide(c):
+                self.endtoken(i+1)
+                return (i+1, self.paren_close)
+            else:
+                return (i+1, self.word)
+        else:
+            return (i, self.paren_close)
+
+    def paren_close(self, i, c):
+        if isinstance(c, str) and (c in self.PAREN_CLOSE or c in self.PUNCT):
+            return (i+1, self.paren_close)
+        else:
+            self.endtoken(i)
+            return (i, self.start)
+
+    def blank(self, i, c):
+        if isinstance(c, str) and c.isspace():
+            return (i+1, self.blank)
+        else:
+            self.endtoken(i)
+            return (i, self.start)
 
 TAGS_IMMED = {
     'meta', 'link', 'hr', 'br', 'input',
@@ -71,11 +131,19 @@ class Element:
         children = ''.join( e.str() if isinstance(e, Element) else repr(e) for e in self.children )
         return f'<{self.tag}{attrs}>{children}</{self.tag}>'
 
-class Content:
+class ElementNode:
 
     def __init__(self, element, children):
-        self.element = element
+        self.tag = element.tag
+        self.attrs = element.attrs
         self.children = children
+        return
+
+class TextNode:
+
+    def __init__(self, context, text):
+        self.context = context
+        self.text = text
         return
 
 class DOMParser(html.parser.HTMLParser):
@@ -147,59 +215,82 @@ def main(argv):
         assert isinstance(e, Element)
         if e.tag in TAGS_IGNORE: return []
         if e.tag == 'input' and e.get('type') == 'hidden': return []
-        if e.tag == 'br': return [(context, '\n')]
+        if e.tag == 'br': return [TextNode(context, [e])]
         if e.tag in TAGS_INLINE:
             context = context + (e,)
         children = []
         for c in e.children:
             if isinstance(c, Element):
-                content = convert(c, context)
-                children.extend(content)
-            else:
-                text = c.strip()
-                if text:
-                    children.append((context, rmsp(text)))
+                nodes = convert(c, context)
+                children.extend(nodes)
+            elif isinstance(c, str):
+                children.append(TextNode(context, c))
         if not children: return []
         if e.tag in TAGS_TRANSPARENT and len(children) == 1:
-            return [children[0]]
+            return children[:1]
         if e.tag in TAGS_INLINE:
             return children
-        return [(context, Content(e, children))]
+        return [ElementNode(e, children)]
 
-    def fold_lines(lines, width):
+    def display_texts(nodes, indent=0):
+        width = max_width - indent
         rows = []
-        for line in lines:
-            w = 0
-            i0 = i1 = 0
-            for token in tokenize(line):
-                wc = sum( 2 if iswide(c) else 1 for c in token )
-                if width < w+wc:
-                    rows.append(line[i0:i1])
+        w = 0
+        blank = False
+        tokens = []
+        for node in nodes:
+            assert isinstance(node, TextNode)
+            for token in Tokenizer().feed(node.text):
+                if isinstance(token, str):
+                    if token.isspace():
+                        if 0 < w:
+                            blank = True
+                        continue
+                    wc = sum( 2 if iswide(c) else 1 for c in token )
+                    if width < w+wc:
+                        if tokens:
+                            rows.append(tokens)
+                        w = 0
+                        blank = False
+                        tokens = []
+                    if blank:
+                        if 0 < w:
+                            token = ' '+token
+                        blank = False
+                    tokens.append(token)
+                    w += wc
+                else:
+                    rows.append(tokens)
                     w = 0
-                    i0 = i1
-                w += wc
-                i1 += len(token)
-            rows.append(line[i0:])
-        return rows
+                    blank = False
+                    tokens = []
+        if tokens:
+            rows.append(tokens)
+        for tokens in rows:
+            print(' '*indent, ''.join(tokens))
+        return
 
-    def display(c, indent=0, bol=True):
-        (context, e) = c
-        if isinstance(e, Content):
-            if bol:
-                print(' '*indent, end='')
-            indent += 1
-            if len(e.children) == 1 and isinstance(e.children[0], Content):
-                print(f'<{e.element.tag}>:', end=' ')
-                display(e.children[0], indent, False)
-            else:
-                print(f'<{e.element.tag}>:')
-                for cc in e.children:
-                    display(cc, indent, True)
+    def display(node, indent=0, bol=True):
+        assert isinstance(node, ElementNode)
+        if bol:
+            print(' '*indent, end='')
+        indent += 1
+        if len(node.children) == 1 and isinstance(node.children[0], ElementNode):
+            print(f'<{node.tag}>:', end=' ')
+            display(node.children[0], indent, False)
         else:
-            assert isinstance(e, str)
-            lines = e.split('\n')
-            for row in fold_lines(lines, max_width-indent):
-                print(' '*indent + row)
+            print(f'<{node.tag}>:')
+            texts = []
+            for n in node.children:
+                if isinstance(n, TextNode):
+                    texts.append(n)
+                else:
+                    if texts:
+                        display_texts(texts, indent=indent)
+                    display(n, indent, True)
+                    texts = []
+            if texts:
+                display_texts(texts, indent=indent)
         return
 
     content = convert(root)
