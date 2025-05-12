@@ -86,6 +86,7 @@ TAGS_IMMED = {
 
 TAGS_PARAGRAPH = {
     'p', 'li', 'dt', 'dd', 'th', 'td',
+    'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
 }
 
 TAGS_IGNORE = {
@@ -137,6 +138,13 @@ class ElementNode:
         self.tag = element.tag
         self.attrs = element.attrs
         self.children = children
+        return
+
+class Context:
+
+    def __init__(self, element, prev=None):
+        self.element = element
+        self.prev = prev
         return
 
 class TextNode:
@@ -211,13 +219,13 @@ def main(argv):
         parser.feed(line.decode('utf-8'))
     root = parser.close()
 
-    def convert(e, context=()):
+    def convert(e, context=None):
         assert isinstance(e, Element)
         if e.tag in TAGS_IGNORE: return []
         if e.tag == 'input' and e.get('type') == 'hidden': return []
         if e.tag == 'br': return [TextNode(context, [e])]
         if e.tag in TAGS_INLINE:
-            context = context + (e,)
+            context = Context(e, context)
         children = []
         for c in e.children:
             if isinstance(c, Element):
@@ -235,9 +243,9 @@ def main(argv):
     def display_texts(nodes, indent=0):
         width = max_width - indent
         rows = []
+        tokens = []
         w = 0
         blank = False
-        tokens = []
         for node in nodes:
             assert isinstance(node, TextNode)
             for token in Tokenizer().feed(node.text):
@@ -251,14 +259,13 @@ def main(argv):
                         if tokens:
                             rows.append(tokens)
                         w = 0
-                        blank = False
                         tokens = []
-                    if blank:
+                    elif blank:
                         if 0 < w:
-                            token = ' '+token
-                        blank = False
+                            tokens.append(' ')
                     tokens.append(token)
                     w += wc
+                    blank = False
                 else:
                     rows.append(tokens)
                     w = 0
