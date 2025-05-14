@@ -39,7 +39,7 @@ class Tokenizer:
 
     def start(self, i, c):
         if isinstance(c, str) and c in self.PAREN_OPEN:
-            return (i, self.paren_open)
+            return (i, self.token_start)
         elif isinstance(c, str) and c.isspace():
             return (i, self.blank)
         elif isinstance(c, str) and c.isalnum():
@@ -49,9 +49,9 @@ class Tokenizer:
             self.endtoken(i+1)
             return (i+1, self.start)
 
-    def paren_open(self, i, c):
+    def token_start(self, i, c):
         if isinstance(c, str) and c in self.PAREN_OPEN:
-            return (i+1, self.paren_open)
+            return (i+1, self.token_start)
         else:
             return (i, self.word)
 
@@ -59,15 +59,15 @@ class Tokenizer:
         if isinstance(c, str) and c.isalnum():
             if iswide(c):
                 self.endtoken(i+1)
-                return (i+1, self.paren_close)
+                return (i+1, self.token_end)
             else:
                 return (i+1, self.word)
         else:
-            return (i, self.paren_close)
+            return (i, self.token_end)
 
-    def paren_close(self, i, c):
+    def token_end(self, i, c):
         if isinstance(c, str) and (c in self.PAREN_CLOSE or c in self.PUNCT):
-            return (i+1, self.paren_close)
+            return (i+1, self.token_end)
         else:
             self.endtoken(i)
             return (i, self.start)
@@ -78,6 +78,44 @@ class Tokenizer:
         else:
             self.endtoken(i)
             return (i, self.start)
+
+class TextLayouter:
+
+    def __init__(self, width):
+        self.width = width
+        self.rows = []
+        self.tokens = []
+        self.w = 0
+        self.blank = False
+        return
+
+    def flush(self, force=False):
+        if force or self.tokens:
+            self.rows.append(self.tokens)
+        self.blank = False
+        self.w = 0
+        self.tokens = []
+        return
+
+    def add(self, text):
+        if text.isspace():
+            if 0 < self.w:
+                self.blank = True
+            return
+        wc = sum( 2 if iswide(c) else 1 for c in text )
+        if self.width < self.w+wc:
+            if self.tokens:
+                self.rows.append(self.tokens)
+            self.tokens = []
+            self.w = 0
+        elif self.blank:
+            if 0 < self.w:
+                self.tokens.append(' ')
+        self.blank = False
+        self.tokens.append(text)
+        self.w += wc
+        return
+
 
 TAGS_IMMED = {
     'meta', 'link', 'hr', 'br', 'input',
@@ -140,18 +178,18 @@ class ElementNode:
         self.children = children
         return
 
-class Context:
+class StartTag:
 
-    def __init__(self, element, prev=None):
-        self.element = element
-        self.prev = prev
+    def __init__(self, element):
+        self.tag = element.tag
+        self.attrs = element.attrs
         return
 
-class TextNode:
+class EndTag:
 
-    def __init__(self, context, text):
-        self.context = context
-        self.text = text
+    def __init__(self, element):
+        self.tag = element.tag
+        self.attrs = element.attrs
         return
 
 class DOMParser(html.parser.HTMLParser):
@@ -219,61 +257,43 @@ def main(argv):
         parser.feed(line.decode('utf-8'))
     root = parser.close()
 
-    def convert(e, context=None):
+    def convert(e):
         assert isinstance(e, Element)
         if e.tag in TAGS_IGNORE: return []
         if e.tag == 'input' and e.get('type') == 'hidden': return []
-        if e.tag == 'br': return [TextNode(context, [e])]
-        if e.tag in TAGS_INLINE:
-            context = Context(e, context)
+        if e.tag == 'br': return [e]
         children = []
+        if e.tag in TAGS_INLINE:
+            children.append(StartTag(e))
         for c in e.children:
             if isinstance(c, Element):
-                nodes = convert(c, context)
+                nodes = convert(c)
                 children.extend(nodes)
             elif isinstance(c, str):
-                children.append(TextNode(context, c))
+                children.append(c)
         if not children: return []
         if e.tag in TAGS_TRANSPARENT and len(children) == 1:
             return children[:1]
         if e.tag in TAGS_INLINE:
+            children.append(EndTag(e))
             return children
         return [ElementNode(e, children)]
 
     def display_texts(nodes, indent=0):
-        width = max_width - indent
-        rows = []
-        tokens = []
-        w = 0
-        blank = False
+        layouter = TextLayouter(max_width - indent)
         for node in nodes:
-            assert isinstance(node, TextNode)
-            for token in Tokenizer().feed(node.text):
-                if isinstance(token, str):
-                    if token.isspace():
-                        if 0 < w:
-                            blank = True
-                        continue
-                    wc = sum( 2 if iswide(c) else 1 for c in token )
-                    if width < w+wc:
-                        if tokens:
-                            rows.append(tokens)
-                        w = 0
-                        tokens = []
-                    elif blank:
-                        if 0 < w:
-                            tokens.append(' ')
-                    tokens.append(token)
-                    w += wc
-                    blank = False
-                else:
-                    rows.append(tokens)
-                    w = 0
-                    blank = False
-                    tokens = []
-        if tokens:
-            rows.append(tokens)
-        for tokens in rows:
+            if isinstance(node, StartTag):
+                layouter.add('[')
+            elif isinstance(node, EndTag):
+                layouter.add(']')
+            elif isinstance(node, Element):
+                layouter.flush(force=True)
+            else:
+                for token in Tokenizer().feed(node):
+                    assert isinstance(token, str), token
+                    layouter.add(token)
+        layouter.flush()
+        for tokens in layouter.rows:
             print(' '*indent, ''.join(tokens))
         return
 
@@ -289,13 +309,13 @@ def main(argv):
             print(f'<{node.tag}>:')
             texts = []
             for n in node.children:
-                if isinstance(n, TextNode):
-                    texts.append(n)
-                else:
+                if isinstance(n, ElementNode):
                     if texts:
                         display_texts(texts, indent=indent)
                     display(n, indent, True)
                     texts = []
+                else:
+                    texts.append(n)
             if texts:
                 display_texts(texts, indent=indent)
         return
