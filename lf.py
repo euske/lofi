@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 import sys
 import urllib.request
 import html.parser
@@ -10,21 +10,21 @@ def iswide(c):
 
 class Tokenizer:
 
-    PAREN_OPEN = '[({"\'「『［（｛【”’'
-    PAREN_CLOSE = '])}"\'」』］）｝】”’'
-    PUNCT = '-.,:;!?、。：；！？'
+    PAREN_OPEN = frozenset('[({"\'「『［（｛【”’')
+    PAREN_CLOSE = frozenset('])}"\'」』］）｝】”’')
+    PUNCT = frozenset('-.,:;!?、。．，：；！？')
 
     def __init__(self):
         return
 
-    def feed(self, s):
-        self.seq = s
+    def feed(self, seq):
+        self.seq = seq
         self.tokens = []
         self.tokenstart = 0
         (i,state) = (0, self.start)
-        while i < len(s):
-            (i, state) = state(i, s[i])
-        self.endtoken(len(s))
+        while i < len(seq):
+            (i, state) = state(i, seq[i])
+        self.endtoken(len(seq))
         return self.tokens
 
     def endtoken(self, i):
@@ -58,7 +58,6 @@ class Tokenizer:
     def word(self, i, c):
         if isinstance(c, str) and c.isalnum():
             if iswide(c):
-                self.endtoken(i+1)
                 return (i+1, self.token_end)
             else:
                 return (i+1, self.word)
