@@ -153,8 +153,8 @@ class Element:
     def __repr__(self):
         return f'<{self.__class__.__name__} tag={self.tag} attrs={self.attrs} children={len(self.children)}>'
 
-    def get(self, name):
-        return self.attrs.get(name)
+    def get(self, name, default=None):
+        return self.attrs.get(name, default)
 
     def append(self, element):
         assert not self.finish
@@ -260,7 +260,7 @@ def main(argv):
         assert isinstance(e, Element)
         if e.tag in TAGS_IGNORE: return []
         if e.tag == 'input' and e.get('type') == 'hidden': return []
-        if e.tag == 'br': return [e]
+        if e.tag in TAGS_IMMED: return [e]
         children = []
         if e.tag in TAGS_INLINE:
             children.append(StartTag(e))
@@ -272,7 +272,7 @@ def main(argv):
                 children.append(c)
         if not children: return []
         if e.tag in TAGS_TRANSPARENT and len(children) == 1:
-            return children[:1]
+            return children
         if e.tag in TAGS_INLINE:
             children.append(EndTag(e))
             return children
@@ -286,7 +286,13 @@ def main(argv):
             elif isinstance(node, EndTag):
                 layouter.add(']')
             elif isinstance(node, Element):
-                layouter.flush(force=True)
+                if node.tag == 'br':
+                    layouter.flush(force=True)
+                elif node.tag == 'img':
+                    alt = node.get('alt', 'IMG')
+                    layouter.add(f'<{alt}>')
+                else:
+                    layouter.add(f'<{node.tag}>')
             else:
                 for token in Tokenizer().feed(node):
                     assert isinstance(token, str), token
