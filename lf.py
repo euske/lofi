@@ -8,6 +8,9 @@ WIDE = re.compile('[\u1100-\u11ff\u231a-\u231b\u2329-\u232a\u23e9-\u23ec\u23f0\u
 def iswide(c):
     return WIDE.match(c)
 
+def filter_content(seq):
+    return [ s for s in seq if not isinstance(s, str) or not s.isspace() ]
+
 class Tokenizer:
 
     PAREN_OPEN = frozenset('[({"\'「『［（｛【”’')
@@ -269,10 +272,11 @@ def main(argv):
                 nodes = convert(c)
                 children.extend(nodes)
             elif isinstance(c, str):
-                children.append(c)
+                children.extend(Tokenizer().feed(c))
         if not children: return []
-        if e.tag in TAGS_TRANSPARENT and len(children) == 1:
-            return children
+        contents = filter_content(children)
+        if e.tag in TAGS_TRANSPARENT and len(contents) == 1:
+            return contents
         if e.tag in TAGS_INLINE:
             children.append(EndTag(e))
             return children
@@ -294,9 +298,8 @@ def main(argv):
                 else:
                     layouter.add(f'<{node.tag}>')
             else:
-                for token in Tokenizer().feed(node):
-                    assert isinstance(token, str), token
-                    layouter.add(token)
+                assert isinstance(node, str), node
+                layouter.add(node)
         layouter.flush()
         for tokens in layouter.rows:
             print(' '*indent, ''.join(tokens))
@@ -307,9 +310,10 @@ def main(argv):
         if bol:
             print(' '*indent, end='')
         indent += 1
-        if len(node.children) == 1 and isinstance(node.children[0], ElementNode):
+        contents = filter_content(node.children)
+        if len(contents) == 1 and isinstance(contents[0], ElementNode):
             print(f'<{node.tag}>:', end=' ')
-            display(node.children[0], indent, False)
+            display(contents[0], indent, False)
         else:
             print(f'<{node.tag}>:')
             texts = []
