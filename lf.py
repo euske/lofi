@@ -8,6 +8,23 @@ WIDE = re.compile('[\u1100-\u11ff\u231a-\u231b\u2329-\u232a\u23e9-\u23ec\u23f0\u
 def iswide(c):
     return WIDE.match(c)
 
+CJK = re.compile('[\u2e80-\u303e\u3041-\ua4cf\ua960-\ua982\uac00-\udfff]')
+def iscjk(c):
+    return CJK.match(c)
+
+ANSI = {
+    'reset': '\033[0m',
+    'bold': '\033[1m',
+    'underline': '\033[4m',
+    'invert': '\033[7m',
+    'red': '\033[91m',
+    'green': '\033[92m',
+    'yellow': '\033[93m',
+    'blue': '\033[94m',
+    'magenta': '\033[95m',
+    'cyan': '\033[96m',
+}
+
 def filter_content(seq):
     return [ s for s in seq if not isinstance(s, str) or not s.isspace() ]
 
@@ -60,7 +77,7 @@ class Tokenizer:
 
     def word(self, i, c):
         if isinstance(c, str) and c.isalnum():
-            if iswide(c):
+            if iscjk(c):
                 return (i+1, self.token_end)
             else:
                 return (i+1, self.word)
@@ -99,12 +116,13 @@ class TextLayouter:
         self.tokens = []
         return
 
-    def add(self, text):
+    def add(self, text, wc=None):
         if text.isspace():
             if 0 < self.w:
                 self.blank = True
             return
-        wc = sum( 2 if iswide(c) else 1 for c in text )
+        if wc is None:
+            wc = sum( 2 if iswide(c) else 1 for c in text )
         if self.width < self.w+wc:
             if self.tokens:
                 self.rows.append(self.tokens)
@@ -286,9 +304,11 @@ def main(argv):
         layouter = TextLayouter(max_width - indent)
         for node in nodes:
             if isinstance(node, StartTag):
+                layouter.add(ANSI['underline'], 0)
                 layouter.add('[')
             elif isinstance(node, EndTag):
                 layouter.add(']')
+                layouter.add(ANSI['reset'], 0)
             elif isinstance(node, Element):
                 if node.tag == 'br':
                     layouter.flush(force=True)
@@ -301,6 +321,7 @@ def main(argv):
                 assert isinstance(node, str), node
                 layouter.add(node)
         layouter.flush()
+
         for tokens in layouter.rows:
             print(' '*indent, ''.join(tokens))
         return
