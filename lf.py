@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 import sys
+import urllib.parse
 import urllib.request
 import html.parser
 import re
+import os.path
 
 WIDE = re.compile('[\u1100-\u11ff\u231a-\u231b\u2329-\u232a\u23e9-\u23ec\u23f0\u23f3\u25fd-\u25fe\u2614-\u2615\u2630-\u2637\u2648-\u2653\u267f\u268a-\u268f\u2693\u26a1\u26aa-\u26ab\u26bd-\u26be\u26c4-\u26c5\u26ce\u26d4\u26ea\u26f2-\u26f3\u26f5\u26fa\u26fd\u2705\u270a-\u270b\u2728\u274c\u274e\u2753-\u2755\u2757\u2795-\u2797\u27b0\u27bf\u2b1b-\u2b1c\u2b50\u2b55\u2e80-\u303e\u3041-\ua4cf\ua960-\ua982\uac00-\udfff\uf900-\ufaff\ufe10-\ufe6f\uff01-\uff60\uffe0-\uffe7]')
 def iswide(c):
@@ -269,9 +271,15 @@ def main(argv):
     max_width = 80
     args = argv[1:]
     url = args.pop(0)
-    opener = urllib.request.FancyURLopener()
-    opener.addheader('User-Agent', user_agent)
-    fp = opener.open(url)
+    if os.path.exists(url):
+        url = f'file://{os.path.abspath(url)}'
+    else:
+        res = urllib.parse.urlparse(url)
+        if not res.scheme:
+            url = f'http://{url}'
+    req = urllib.request.Request(url)
+    req.add_header('User-Agent', user_agent)
+    fp = urllib.request.urlopen(req)
     parser = DOMParser()
     for line in fp:
         parser.feed(line.decode('utf-8'))
@@ -304,11 +312,17 @@ def main(argv):
         layouter = TextLayouter(max_width - indent)
         for node in nodes:
             if isinstance(node, StartTag):
-                layouter.add(ANSI['underline'], 0)
-                layouter.add('[')
+                if node.tag == 'a':
+                    layouter.add(ANSI['underline'], 0)
+                    layouter.add('[')
+                elif node.tag in ('b', 'strong'):
+                    layouter.add(ANSI['bold'], 0)
             elif isinstance(node, EndTag):
-                layouter.add(']')
-                layouter.add(ANSI['reset'], 0)
+                if node.tag == 'a':
+                    layouter.add(']')
+                    layouter.add(ANSI['reset'], 0)
+                elif node.tag in ('b', 'strong'):
+                    layouter.add(ANSI['reset'], 0)
             elif isinstance(node, Element):
                 if node.tag == 'br':
                     layouter.flush(force=True)
