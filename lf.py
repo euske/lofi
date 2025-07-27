@@ -14,18 +14,35 @@ CJK = re.compile('[\u2e80-\u303e\u3041-\ua4cf\ua960-\ua982\uac00-\udfff]')
 def iscjk(c):
     return CJK.match(c)
 
-ANSI = {
-    'reset': '\033[0m',
-    'bold': '\033[1m',
-    'underline': '\033[4m',
-    'invert': '\033[7m',
-    'red': '\033[91m',
-    'green': '\033[92m',
-    'yellow': '\033[93m',
-    'blue': '\033[94m',
-    'magenta': '\033[95m',
-    'cyan': '\033[96m',
-}
+class Ansi:
+
+    RESET = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+    INVERT = '\033[7m'
+
+    RED = '\033[91m'
+    GREEN = '\033[92m'
+    YELLOW = '\033[93m'
+    BLUE = '\033[94m'
+    MAGENTA = '\033[95m'
+    CYAN = '\033[96m'
+    WHITE = '\033[97m'
+
+    @classmethod
+    def move(klass, dy=0, col=0, clear=False):
+        if 0 < dy:
+            s = f'\033[{dy}E'
+        elif dy < 0:
+            s = f'\033[{-dy}F'
+        else:
+            s = ''
+        if col:
+            s += f'\033[{col}G'
+        if clear:
+            s += '\033[K'
+        return s
+
 
 def filter_content(seq):
     return [ s for s in seq if not isinstance(s, str) or not s.isspace() ]
@@ -313,16 +330,16 @@ def main(argv):
         for node in nodes:
             if isinstance(node, StartTag):
                 if node.tag == 'a':
-                    layouter.add(ANSI['underline'], 0)
+                    layouter.add(Ansi.UNDERLINE, 0)
                     layouter.add('[')
                 elif node.tag in ('b', 'strong'):
-                    layouter.add(ANSI['bold'], 0)
+                    layouter.add(Ansi.BOLD, 0)
             elif isinstance(node, EndTag):
                 if node.tag == 'a':
                     layouter.add(']')
-                    layouter.add(ANSI['reset'], 0)
+                    layouter.add(Ansi.RESET, 0)
                 elif node.tag in ('b', 'strong'):
-                    layouter.add(ANSI['reset'], 0)
+                    layouter.add(Ansi.RESET, 0)
             elif isinstance(node, Element):
                 if node.tag == 'br':
                     layouter.flush(force=True)
