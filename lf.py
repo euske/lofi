@@ -14,6 +14,7 @@ CJK = re.compile('[\u2e80-\u303e\u3041-\ua4cf\ua960-\ua982\uac00-\udfff]')
 def iscjk(c):
     return CJK.match(c)
 
+# https://gist.github.com/fnky/458719343aabd01cfb17a3a4f7296797
 class Ansi:
 
     RESET = '\033[0m'
@@ -59,12 +60,13 @@ class Tokenizer:
     def feed(self, seq):
         self.seq = seq
         self.tokens = []
+        self.weight = 0
         self.tokenstart = 0
         (i,state) = (0, self.start)
         while i < len(seq):
             (i, state) = state(i, seq[i])
         self.endtoken(len(seq))
-        return self.tokens
+        return (self.tokens, self.weight)
 
     def endtoken(self, i):
         if self.tokenstart < i:
@@ -96,6 +98,7 @@ class Tokenizer:
 
     def word(self, i, c):
         if isinstance(c, str) and c.isalnum():
+            self.weight += 1
             if iscjk(c):
                 return (i+1, self.token_end)
             else:
@@ -211,10 +214,11 @@ class Element:
 
 class ElementNode:
 
-    def __init__(self, element, children):
+    def __init__(self, element, children, weight):
         self.tag = element.tag
         self.attrs = element.attrs
         self.children = children
+        self.weight = weight
         return
 
 class StartTag:
@@ -304,26 +308,30 @@ def main(argv):
 
     def convert(e):
         assert isinstance(e, Element)
-        if e.tag in TAGS_IGNORE: return []
-        if e.tag == 'input' and e.get('type') == 'hidden': return []
-        if e.tag in TAGS_IMMED: return [e]
+        if e.tag in TAGS_IGNORE: return ([], 0)
+        if e.tag == 'input' and e.get('type') == 'hidden': return ([], 0)
+        if e.tag in TAGS_IMMED: return ([e], 0)
         children = []
+        weight = 0
         if e.tag in TAGS_INLINE:
             children.append(StartTag(e))
         for c in e.children:
             if isinstance(c, Element):
-                nodes = convert(c)
+                (nodes, wc) = convert(c)
                 children.extend(nodes)
+                weight += wc
             elif isinstance(c, str):
-                children.extend(Tokenizer().feed(c))
-        if not children: return []
+                (tokens, wc) = Tokenizer().feed(c)
+                children.extend(tokens)
+                weight += wc
+        if not children: return ([], 0)
         contents = filter_content(children)
         if e.tag in TAGS_TRANSPARENT and len(contents) == 1:
-            return contents
+            return (contents, weight)
         if e.tag in TAGS_INLINE:
             children.append(EndTag(e))
-            return children
-        return [ElementNode(e, children)]
+            return (children, weight)
+        return ([ElementNode(e, children, weight)], weight)
 
     def display_texts(nodes, indent=0):
         layouter = TextLayouter(max_width - indent)
@@ -381,7 +389,7 @@ def main(argv):
                 display_texts(texts, indent=indent)
         return
 
-    content = convert(root)
+    (content, _) = convert(root)
     assert len(content) == 1
     display(content[0])
     return 0
