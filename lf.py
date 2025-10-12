@@ -328,7 +328,7 @@ class Canvas:
             print(text, end='')
         return
 
-    def display_texts(self, nodes, indent=0):
+    def render_texts(self, nodes, indent=0):
         layouter = TextLayouter(self.max_width - indent)
         for node in nodes:
             if isinstance(node, StartTag):
@@ -360,7 +360,7 @@ class Canvas:
             self.print(' '*indent + ''.join(tokens), True)
         return
 
-    def display(self, node, indent=0, bol=True):
+    def render(self, node, indent=0, bol=True):
         assert isinstance(node, ElementNode)
         if bol:
             self.print(' '*indent)
@@ -368,22 +368,21 @@ class Canvas:
         contents = filter_content(node.children)
         if len(contents) == 1 and isinstance(contents[0], ElementNode):
             self.print(f'<{node.tag}>: ')
-            self.display(contents[0], indent, False)
+            self.render(contents[0], indent, False)
         else:
             self.print(f'<{node.tag}>:', True)
             texts = []
             for n in node.children:
                 if isinstance(n, ElementNode):
                     if texts:
-                        self.display_texts(texts, indent=indent)
-                    self.display(n, indent, True)
+                        self.render_texts(texts, indent=indent)
+                    self.render(n, indent, True)
                     texts = []
                 else:
                     texts.append(n)
             if texts:
-                self.display_texts(texts, indent=indent)
+                self.render_texts(texts, indent=indent)
         return
-
 
 
 def main(argv):
@@ -411,7 +410,7 @@ def main(argv):
     assert len(content) == 1
     # render html
     canvas = Canvas(max_width)
-    canvas.display(content[0])
+    canvas.render(content[0])
     return 0
 
 if __name__ == '__main__': sys.exit(main(sys.argv))
