@@ -165,6 +165,9 @@ class ElementNode:
         self.weight = weight
         return
 
+    def __repr__(self):
+        return f'<ElementNode: {self.tag} ({self.weight})>'
+
 class StartTag:
 
     def __init__(self, element):
@@ -172,12 +175,17 @@ class StartTag:
         self.attrs = element.attrs
         return
 
+    def __repr__(self):
+        return f'<StartTag: {self.tag} {self.attrs}>'
+
 class EndTag:
 
     def __init__(self, element):
         self.tag = element.tag
-        self.attrs = element.attrs
         return
+
+    def __repr__(self):
+        return f'<EndTag: {self.tag}>'
 
 TAGS_IMMED = {
     'meta', 'link', 'hr', 'br', 'input',
@@ -319,11 +327,14 @@ class Canvas:
 
     def __init__(self, max_width):
         self.max_width = max_width
+        self.lineno = 0
+        self.nodepos = {}
         return
 
     def print(self, text, newline=False):
         if newline:
             print(text)
+            self.lineno += 1
         else:
             print(text, end='')
         return
@@ -363,6 +374,7 @@ class Canvas:
     def render(self, node, indent=0, bol=True):
         assert isinstance(node, ElementNode)
         if bol:
+            self.nodepos[node] = (self.lineno, indent)
             self.print(' '*indent)
         indent += 1
         contents = filter_content(node.children)
@@ -405,10 +417,10 @@ def main(argv):
     for line in fp:
         parser.feed(line.decode('utf-8'))
     root = parser.close()
-    # convert html
+    # convert html -> elements
     (content, _) = root.convert()
     assert len(content) == 1
-    # render html
+    # render elements
     canvas = Canvas(max_width)
     canvas.render(content[0])
     return 0
