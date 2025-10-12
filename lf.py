@@ -45,9 +45,6 @@ class Ansi:
         return s
 
 
-def filter_content(seq):
-    return [ s for s in seq if not isinstance(s, str) or not s.isspace() ]
-
 class Tokenizer:
 
     PAREN_OPEN = frozenset('[({"\'「『［（｛【”’')
@@ -159,6 +156,29 @@ class TextLayouter:
         return
 
 
+class ElementNode:
+
+    def __init__(self, element, children, weight):
+        self.tag = element.tag
+        self.attrs = element.attrs
+        self.children = children
+        self.weight = weight
+        return
+
+class StartTag:
+
+    def __init__(self, element):
+        self.tag = element.tag
+        self.attrs = element.attrs
+        return
+
+class EndTag:
+
+    def __init__(self, element):
+        self.tag = element.tag
+        self.attrs = element.attrs
+        return
+
 TAGS_IMMED = {
     'meta', 'link', 'hr', 'br', 'input',
     'img', 'object',
@@ -183,6 +203,9 @@ TAGS_INLINE = {
 TAGS_TRANSPARENT = {
     'div', 'span',
 }
+
+def filter_content(seq):
+    return [ s for s in seq if not isinstance(s, str) or not s.isspace() ]
 
 class Element:
 
@@ -212,28 +235,32 @@ class Element:
         children = ''.join( e.str() if isinstance(e, Element) else repr(e) for e in self.children )
         return f'<{self.tag}{attrs}>{children}</{self.tag}>'
 
-class ElementNode:
+    def convert(self):
+        if self.tag in TAGS_IGNORE: return ([], 0)
+        if self.tag == 'input' and self.get('type') == 'hidden': return ([], 0)
+        if self.tag in TAGS_IMMED: return ([self], 0)
+        children = []
+        weight = 0
+        if self.tag in TAGS_INLINE:
+            children.append(StartTag(self))
+        for c in self.children:
+            if isinstance(c, Element):
+                (nodes, wc) = c.convert()
+                children.extend(nodes)
+                weight += wc
+            elif isinstance(c, str):
+                (tokens, wc) = Tokenizer().feed(c)
+                children.extend(tokens)
+                weight += wc
+        if not children: return ([], 0)
+        contents = filter_content(children)
+        if self.tag in TAGS_TRANSPARENT and len(contents) == 1:
+            return (contents, weight)
+        if self.tag in TAGS_INLINE:
+            children.append(EndTag(self))
+            return (children, weight)
+        return ([ElementNode(self, children, weight)], weight)
 
-    def __init__(self, element, children, weight):
-        self.tag = element.tag
-        self.attrs = element.attrs
-        self.children = children
-        self.weight = weight
-        return
-
-class StartTag:
-
-    def __init__(self, element):
-        self.tag = element.tag
-        self.attrs = element.attrs
-        return
-
-class EndTag:
-
-    def __init__(self, element):
-        self.tag = element.tag
-        self.attrs = element.attrs
-        return
 
 class DOMParser(html.parser.HTMLParser):
 
@@ -287,54 +314,22 @@ class DOMParser(html.parser.HTMLParser):
         self._stack[-1].append(Element(tag, dict(attrs), finish=True))
         return
 
-def main(argv):
-    user_agent = 'lofi browser'
-    max_width = 80
-    args = argv[1:]
-    url = args.pop(0)
-    if os.path.exists(url):
-        url = f'file://{os.path.abspath(url)}'
-    else:
-        res = urllib.parse.urlparse(url)
-        if not res.scheme:
-            url = f'http://{url}'
-    req = urllib.request.Request(url)
-    req.add_header('User-Agent', user_agent)
-    fp = urllib.request.urlopen(req)
-    parser = DOMParser()
-    for line in fp:
-        parser.feed(line.decode('utf-8'))
-    root = parser.close()
 
-    def convert(e):
-        assert isinstance(e, Element)
-        if e.tag in TAGS_IGNORE: return ([], 0)
-        if e.tag == 'input' and e.get('type') == 'hidden': return ([], 0)
-        if e.tag in TAGS_IMMED: return ([e], 0)
-        children = []
-        weight = 0
-        if e.tag in TAGS_INLINE:
-            children.append(StartTag(e))
-        for c in e.children:
-            if isinstance(c, Element):
-                (nodes, wc) = convert(c)
-                children.extend(nodes)
-                weight += wc
-            elif isinstance(c, str):
-                (tokens, wc) = Tokenizer().feed(c)
-                children.extend(tokens)
-                weight += wc
-        if not children: return ([], 0)
-        contents = filter_content(children)
-        if e.tag in TAGS_TRANSPARENT and len(contents) == 1:
-            return (contents, weight)
-        if e.tag in TAGS_INLINE:
-            children.append(EndTag(e))
-            return (children, weight)
-        return ([ElementNode(e, children, weight)], weight)
+class Canvas:
 
-    def display_texts(nodes, indent=0):
-        layouter = TextLayouter(max_width - indent)
+    def __init__(self, max_width):
+        self.max_width = max_width
+        return
+
+    def print(self, text, newline=False):
+        if newline:
+            print(text)
+        else:
+            print(text, end='')
+        return
+
+    def display_texts(self, nodes, indent=0):
+        layouter = TextLayouter(self.max_width - indent)
         for node in nodes:
             if isinstance(node, StartTag):
                 if node.tag == 'a':
@@ -362,36 +357,61 @@ def main(argv):
         layouter.flush()
 
         for tokens in layouter.rows:
-            print(' '*indent, ''.join(tokens))
+            self.print(' '*indent + ''.join(tokens), True)
         return
 
-    def display(node, indent=0, bol=True):
+    def display(self, node, indent=0, bol=True):
         assert isinstance(node, ElementNode)
         if bol:
-            print(' '*indent, end='')
+            self.print(' '*indent)
         indent += 1
         contents = filter_content(node.children)
         if len(contents) == 1 and isinstance(contents[0], ElementNode):
-            print(f'<{node.tag}>:', end=' ')
-            display(contents[0], indent, False)
+            self.print(f'<{node.tag}>: ')
+            self.display(contents[0], indent, False)
         else:
-            print(f'<{node.tag}>:')
+            self.print(f'<{node.tag}>:', True)
             texts = []
             for n in node.children:
                 if isinstance(n, ElementNode):
                     if texts:
-                        display_texts(texts, indent=indent)
-                    display(n, indent, True)
+                        self.display_texts(texts, indent=indent)
+                    self.display(n, indent, True)
                     texts = []
                 else:
                     texts.append(n)
             if texts:
-                display_texts(texts, indent=indent)
+                self.display_texts(texts, indent=indent)
         return
 
-    (content, _) = convert(root)
+
+
+def main(argv):
+    user_agent = 'lofi browser'
+    max_width = 80
+    args = argv[1:]
+    url = args.pop(0)
+    if os.path.exists(url):
+        url = f'file://{os.path.abspath(url)}'
+    else:
+        res = urllib.parse.urlparse(url)
+        if not res.scheme:
+            url = f'http://{url}'
+    # open url
+    req = urllib.request.Request(url)
+    req.add_header('User-Agent', user_agent)
+    fp = urllib.request.urlopen(req)
+    # parse html
+    parser = DOMParser()
+    for line in fp:
+        parser.feed(line.decode('utf-8'))
+    root = parser.close()
+    # convert html
+    (content, _) = root.convert()
     assert len(content) == 1
-    display(content[0])
+    # render html
+    canvas = Canvas(max_width)
+    canvas.display(content[0])
     return 0
 
 if __name__ == '__main__': sys.exit(main(sys.argv))
