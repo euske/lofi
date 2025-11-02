@@ -5,6 +5,8 @@ import urllib.request
 import html.parser
 import re
 import os.path
+import tty
+import termios
 
 WIDE = re.compile('[\u1100-\u11ff\u231a-\u231b\u2329-\u232a\u23e9-\u23ec\u23f0\u23f3\u25fd-\u25fe\u2614-\u2615\u2630-\u2637\u2648-\u2653\u267f\u268a-\u268f\u2693\u26a1\u26aa-\u26ab\u26bd-\u26be\u26c4-\u26c5\u26ce\u26d4\u26ea\u26f2-\u26f3\u26f5\u26fa\u26fd\u2705\u270a-\u270b\u2728\u274c\u274e\u2753-\u2755\u2757\u2795-\u2797\u27b0\u27bf\u2b1b-\u2b1c\u2b50\u2b55\u2e80-\u303e\u3041-\ua4cf\ua960-\ua982\uac00-\udfff\uf900-\ufaff\ufe10-\ufe6f\uff01-\uff60\uffe0-\uffe7]')
 def iswide(c):
@@ -13,6 +15,16 @@ def iswide(c):
 CJK = re.compile('[\u2e80-\u303e\u3041-\ua4cf\ua960-\ua982\uac00-\udfff]')
 def iscjk(c):
     return CJK.match(c)
+
+STDIN = sys.stdin.fileno()
+def getkey():
+    attrs = tty.setcbreak(STDIN)
+    try:
+        key = os.read(STDIN, 10)
+    finally:
+        termios.tcsetattr(STDIN, termios.TCSADRAIN, attrs)
+    return key
+
 
 # https://gist.github.com/fnky/458719343aabd01cfb17a3a4f7296797
 class Ansi:
@@ -163,6 +175,7 @@ class ElementNode:
         self.attrs = element.attrs
         self.children = children
         self.weight = weight
+        self.open = False
         return
 
     def __repr__(self):
@@ -325,18 +338,25 @@ class DOMParser(html.parser.HTMLParser):
 
 class Canvas:
 
-    def __init__(self, max_width):
+    def __init__(self, fp, max_width):
+        self.fp = fp
         self.max_width = max_width
         self.lineno = 0
         self.nodepos = {}
         return
 
+    def moveto(self, y):
+        self.fp.write(Ansi.move(y - self.lineno))
+        self.lineno = y
+        return
+
     def print(self, text, newline=False):
+        assert '\n' not in text
         if newline:
-            print(text)
+            self.fp.write(text+'\n')
             self.lineno += 1
         else:
-            print(text, end='')
+            self.fp.write(text)
         return
 
     def render_texts(self, nodes, indent=0):
@@ -376,13 +396,18 @@ class Canvas:
         if bol:
             self.nodepos[node] = (self.lineno, indent)
             self.print(' '*indent)
+            if node.open:
+                self.print('+ ')
+            else:
+                self.print('- ')
         indent += 1
-        contents = filter_content(node.children)
-        if len(contents) == 1 and isinstance(contents[0], ElementNode):
-            self.print(f'<{node.tag}>: ')
-            self.render(contents[0], indent, False)
-        else:
-            self.print(f'<{node.tag}>:', True)
+        # contents = filter_content(node.children)
+        # if len(contents) == 1 and isinstance(contents[0], ElementNode):
+        #     self.print(f'<{node.tag}>: ')
+        #     self.render(contents[0], indent, False)
+        #     return
+        self.print(f'<{node.tag}>:', True)
+        if node.open:
             texts = []
             for n in node.children:
                 if isinstance(n, ElementNode):
@@ -396,6 +421,13 @@ class Canvas:
                 self.render_texts(texts, indent=indent)
         return
 
+KEYMAP = {
+    b'q': 'quit',
+    b'\033': 'quit',
+    b' ': 'open',
+    b'\n': 'open',
+    b'\r': 'open',
+}
 
 def main(argv):
     user_agent = 'lofi browser'
@@ -408,6 +440,7 @@ def main(argv):
         res = urllib.parse.urlparse(url)
         if not res.scheme:
             url = f'http://{url}'
+    canvas = Canvas(sys.stdout, max_width)
     # open url
     req = urllib.request.Request(url)
     req.add_header('User-Agent', user_agent)
@@ -420,9 +453,20 @@ def main(argv):
     # convert html -> elements
     (content, _) = root.convert()
     assert len(content) == 1
+    root = content[0]
     # render elements
-    canvas = Canvas(max_width)
-    canvas.render(content[0])
+    canvas.render(root)
+    # event loop
+    current = root
+    while True:
+        key = getkey()
+        cmd = KEYMAP.get(key)
+        if cmd == 'quit':
+            break
+        elif cmd == 'open':
+            current.open = not current.open
+            canvas.moveto(0)
+            canvas.render(root)
     return 0
 
 if __name__ == '__main__': sys.exit(main(sys.argv))
