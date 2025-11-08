@@ -345,9 +345,11 @@ class Canvas:
         self.nodepos = {}
         return
 
-    def moveto(self, y):
-        self.fp.write(Ansi.move(y - self.lineno))
-        self.lineno = y
+    def moveto(self, node):
+        if node in self.nodepos:
+            (lineno, _) = self.nodepos[node]
+            self.fp.write(Ansi.move(lineno - self.lineno))
+            self.lineno = lineno
         return
 
     def print(self, text, newline=False):
@@ -454,19 +456,17 @@ def main(argv):
     (content, _) = root.convert()
     assert len(content) == 1
     root = content[0]
-    # render elements
-    canvas.render(root)
     # event loop
     current = root
     while True:
+        canvas.moveto(root)
+        canvas.render(root)
         key = getkey()
         cmd = KEYMAP.get(key)
         if cmd == 'quit':
             break
         elif cmd == 'open':
             current.open = not current.open
-            canvas.moveto(0)
-            canvas.render(root)
     return 0
 
 if __name__ == '__main__': sys.exit(main(sys.argv))
