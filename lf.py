@@ -42,8 +42,10 @@ class Ansi:
     CYAN = '\033[96m'
     WHITE = '\033[97m'
 
+    CLEAR = '\033[K'
+
     @classmethod
-    def move(klass, dy=0, col=0, clear=False):
+    def move(klass, dy=0, col=0):
         if 0 < dy:
             s = f'\033[{dy}E'
         elif dy < 0:
@@ -51,9 +53,7 @@ class Ansi:
         else:
             s = ''
         if col:
-            s += f'\033[{col}G'
-        if clear:
-            s += '\033[K'
+            s += f'\033[{col+1}G'
         return s
 
 
@@ -175,11 +175,31 @@ class ElementNode:
         self.attrs = element.attrs
         self.children = children
         self.weight = weight
+        self.parent = None
+        self.siblings = [self]
         self.open = False
         return
 
     def __repr__(self):
         return f'<ElementNode: {self.tag} ({self.weight})>'
+
+    def path(self):
+        seq = []
+        node = self
+        while node is not None:
+            seq.append(node)
+            node = node.parent
+        return seq
+
+    def scan(self):
+        siblings = []
+        for c in self.children:
+            if isinstance(c, ElementNode):
+                c.parent = self
+                c.siblings = siblings
+                siblings.append(c)
+                c.scan()
+        return
 
 class StartTag:
 
@@ -342,23 +362,33 @@ class Canvas:
         self.fp = fp
         self.max_width = max_width
         self.lineno = 0
+        self.maxline = 0
         self.nodepos = {}
         return
 
     def moveto(self, node):
         if node in self.nodepos:
-            (lineno, _) = self.nodepos[node]
-            self.fp.write(Ansi.move(lineno - self.lineno))
+            (lineno, col) = self.nodepos[node]
+            self.fp.write(Ansi.move(lineno - self.lineno, col))
+            self.fp.flush()
             self.lineno = lineno
         return
 
-    def print(self, text, newline=False):
+    def print(self, text):
         assert '\n' not in text
-        if newline:
-            self.fp.write(text+'\n')
-            self.lineno += 1
-        else:
-            self.fp.write(text)
+        self.fp.write(text)
+        return
+
+    def newline(self):
+        self.fp.write(Ansi.CLEAR + '\n')
+        self.lineno += 1
+        self.maxline = max(self.maxline, self.lineno)
+        return
+
+    def flush(self):
+        for i in range(self.lineno, self.maxline):
+            self.fp.write(Ansi.CLEAR + '\n')
+        (self.lineno, self.maxline) = (self.maxline, self.lineno)
         return
 
     def render_texts(self, nodes, indent=0):
@@ -390,15 +420,17 @@ class Canvas:
         layouter.flush()
 
         for tokens in layouter.rows:
-            self.print(' '*indent + ''.join(tokens), True)
+            self.print(' '*indent + ''.join(tokens))
+            self.newline()
         return
 
-    def render(self, node, indent=0, bol=True):
+    def render(self, node, path=(), indent=0, bol=True):
         assert isinstance(node, ElementNode)
+        open = node.open or (node in path)
         if bol:
             self.nodepos[node] = (self.lineno, indent)
             self.print(' '*indent)
-            if node.open:
+            if open:
                 self.print('+ ')
             else:
                 self.print('- ')
@@ -408,14 +440,15 @@ class Canvas:
         #     self.print(f'<{node.tag}>: ')
         #     self.render(contents[0], indent, False)
         #     return
-        self.print(f'<{node.tag}>:', True)
-        if node.open:
+        self.print(f'<{node.tag}>:')
+        self.newline()
+        if open:
             texts = []
             for n in node.children:
                 if isinstance(n, ElementNode):
                     if texts:
                         self.render_texts(texts, indent=indent)
-                    self.render(n, indent, True)
+                    self.render(n, path, indent, True)
                     texts = []
                 else:
                     texts.append(n)
@@ -429,6 +462,14 @@ KEYMAP = {
     b' ': 'open',
     b'\n': 'open',
     b'\r': 'open',
+    b'k': 'up',
+    b'\x1b[A': 'up',
+    b'j': 'down',
+    b'\x1b[B': 'down',
+    b'l': 'right',
+    b'\x1b[C': 'right',
+    b'h': 'left',
+    b'\x1b[D': 'left',
 }
 
 def main(argv):
@@ -456,17 +497,39 @@ def main(argv):
     (content, _) = root.convert()
     assert len(content) == 1
     root = content[0]
+    root.scan()
     # event loop
     current = root
     while True:
         canvas.moveto(root)
-        canvas.render(root)
+        canvas.render(root, path=current.path())
+        canvas.flush()
+        canvas.moveto(current)
         key = getkey()
         cmd = KEYMAP.get(key)
         if cmd == 'quit':
             break
         elif cmd == 'open':
             current.open = not current.open
+        elif cmd == 'down':
+            siblings = current.siblings
+            i = siblings.index(current)
+            i = (i+1) % len(siblings)
+            current = siblings[i]
+        elif cmd == 'up':
+            siblings = current.siblings
+            i = siblings.index(current)
+            i = (i+len(siblings)-1) % len(siblings)
+            current = siblings[i]
+        elif cmd == 'left':
+            if current.parent is not None:
+                current = current.parent
+        elif cmd == 'right':
+            children = [ c for c in current.children if isinstance(c, ElementNode) ]
+            if children:
+                current = children[0]
+        else:
+            print(key)
     return 0
 
 if __name__ == '__main__': sys.exit(main(sys.argv))
