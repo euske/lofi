@@ -191,14 +191,15 @@ class ElementNode:
             node = node.parent
         return seq
 
-    def scan(self):
+    def scan(self, spine):
+        spine.append(self)
         siblings = []
         for c in self.children:
             if isinstance(c, ElementNode):
                 c.parent = self
                 c.siblings = siblings
                 siblings.append(c)
-                c.scan()
+                c.scan(spine)
         return
 
 class StartTag:
@@ -497,7 +498,8 @@ def main(argv):
     (content, _) = root.convert()
     assert len(content) == 1
     root = content[0]
-    root.scan()
+    spine = []
+    root.scan(spine)
     # event loop
     current = root
     while True:
@@ -512,15 +514,16 @@ def main(argv):
         elif cmd == 'open':
             current.open = not current.open
         elif cmd == 'down':
-            siblings = current.siblings
-            i = siblings.index(current)
-            i = (i+1) % len(siblings)
-            current = siblings[i]
+            i = spine.index(current)
+            if i+1 < len(spine):
+                current = spine[i+1]
         elif cmd == 'up':
             siblings = current.siblings
             i = siblings.index(current)
-            i = (i+len(siblings)-1) % len(siblings)
-            current = siblings[i]
+            if i == 0:
+                current = current.parent
+            else:
+                current = siblings[i-1]
         elif cmd == 'left':
             if current.parent is not None:
                 current = current.parent
