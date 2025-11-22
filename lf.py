@@ -358,8 +358,8 @@ class DOMParser(html.parser.HTMLParser):
 
 class Canvas:
 
-    def __init__(self, fp, max_width):
-        self.fp = fp
+    def __init__(self, output, max_width):
+        self.output = output
         self.max_width = max_width
         self.lineno = 0
         self.maxline = 0
@@ -369,25 +369,25 @@ class Canvas:
     def moveto(self, node):
         if node in self.nodepos:
             (lineno, col) = self.nodepos[node]
-            self.fp.write(Ansi.move(lineno - self.lineno, col))
-            self.fp.flush()
+            self.output.write(Ansi.move(lineno - self.lineno, col))
+            self.output.flush()
             self.lineno = lineno
         return
 
     def print(self, text):
         assert '\n' not in text
-        self.fp.write(text)
+        self.output.write(text)
         return
 
     def newline(self):
-        self.fp.write(Ansi.CLEAR + '\n')
+        self.output.write(Ansi.CLEAR + '\n')
         self.lineno += 1
         self.maxline = max(self.maxline, self.lineno)
         return
 
     def flush(self):
         for i in range(self.lineno, self.maxline):
-            self.fp.write(Ansi.CLEAR + '\n')
+            self.output.write(Ansi.CLEAR + '\n')
         (self.lineno, self.maxline) = (self.maxline, self.lineno)
         return
 
@@ -424,9 +424,9 @@ class Canvas:
             self.newline()
         return
 
-    def render(self, node, opens=(), indent=0, bol=True):
+    def render(self, node, opens=None, indent=0, bol=True):
         assert isinstance(node, ElementNode)
-        isopen = node in opens
+        isopen = (opens is None) or (node in opens)
         if bol:
             self.nodepos[node] = (self.lineno, indent)
             self.print(' '*indent)
@@ -473,9 +473,20 @@ KEYMAP = {
 }
 
 def main(argv):
+    import getopt
+    def usage():
+        print('usage: %s [-w width] url' % argv[0])
+        return 100
+    try:
+        (opts, args) = getopt.getopt(argv[1:], 'w:')
+    except getopt.GetoptError:
+        return usage()
     user_agent = 'lofi browser'
     max_width = 80
-    args = argv[1:]
+    for (k, v) in opts:
+        if k == '-w': max_width = int(v)
+    if not args:
+        return usage()
     url = args.pop(0)
     if os.path.exists(url):
         url = f'file://{os.path.abspath(url)}'
@@ -497,6 +508,9 @@ def main(argv):
     (content, _) = root.convert()
     assert len(content) == 1
     root = content[0]
+    if not sys.stdout.isatty():
+        canvas.render(root)
+        return
     spine = []
     root.scan(spine)
     # event loop
