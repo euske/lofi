@@ -177,7 +177,6 @@ class ElementNode:
         self.weight = weight
         self.parent = None
         self.siblings = [self]
-        self.open = False
         return
 
     def __repr__(self):
@@ -425,13 +424,13 @@ class Canvas:
             self.newline()
         return
 
-    def render(self, node, path=(), indent=0, bol=True):
+    def render(self, node, opens=(), indent=0, bol=True):
         assert isinstance(node, ElementNode)
-        open = node.open or (node in path)
+        isopen = node in opens
         if bol:
             self.nodepos[node] = (self.lineno, indent)
             self.print(' '*indent)
-            if open:
+            if isopen:
                 self.print('+ ')
             else:
                 self.print('- ')
@@ -443,13 +442,13 @@ class Canvas:
         #     return
         self.print(f'<{node.tag}>:')
         self.newline()
-        if open:
+        if isopen:
             texts = []
             for n in node.children:
                 if isinstance(n, ElementNode):
                     if texts:
                         self.render_texts(texts, indent=indent)
-                    self.render(n, path, indent, True)
+                    self.render(n, opens, indent, True)
                     texts = []
                 else:
                     texts.append(n)
@@ -502,9 +501,10 @@ def main(argv):
     root.scan(spine)
     # event loop
     current = root
+    opens = set()
     while True:
         canvas.moveto(root)
-        canvas.render(root, path=current.path())
+        canvas.render(root, opens.union(current.path()))
         canvas.flush()
         canvas.moveto(current)
         key = getkey()
@@ -512,7 +512,10 @@ def main(argv):
         if cmd == 'quit':
             break
         elif cmd == 'open':
-            current.open = not current.open
+            if current in opens:
+                opens.remove(current)
+            else:
+                opens.add(current)
         elif cmd == 'down':
             i = spine.index(current)
             if i+1 < len(spine):
