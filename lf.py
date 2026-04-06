@@ -64,18 +64,18 @@ class Tokenizer:
     PUNCT = frozenset('-.,:;!?、。．，：；！？')
 
     def __init__(self):
+        self.tokens = []
+        self.weight = 0
         return
 
     def feed(self, seq):
         self.seq = seq
-        self.tokens = []
-        self.weight = 0
         self.tokenstart = 0
         (i,state) = (0, self.start)
         while i < len(seq):
             (i, state) = state(i, seq[i])
         self.endtoken(len(seq))
-        return (self.tokens, self.weight)
+        return
 
     def endtoken(self, i):
         if self.tokenstart < i:
@@ -129,6 +129,12 @@ class Tokenizer:
             self.endtoken(i)
             return (i, self.start)
 
+    @classmethod
+    def tokenize(klass, seq):
+        tokenizer = klass()
+        tokenizer.feed(seq)
+        return (tokenizer.tokens, tokenizer.weight)
+
 class TextLayouter:
 
     def __init__(self, width):
@@ -147,13 +153,17 @@ class TextLayouter:
         self.tokens = []
         return
 
-    def add(self, text, wc=None):
+    def ctrl(self, text):
+        assert text.startswith('\033'), text
+        self.tokens.append(text)
+        return
+
+    def add(self, text):
         if text.isspace():
             if 0 < self.w:
                 self.blank = True
             return
-        if wc is None:
-            wc = sum( 2 if iswide(c) else 1 for c in text )
+        wc = sum( 2 if iswide(c) else 1 for c in text )
         if self.width < self.w+wc:
             if self.tokens:
                 self.rows.append(self.tokens)
@@ -241,13 +251,6 @@ TAGS_INLINE = {
     'strong', 'sub', 'sup', 'tt', 'u',
 }
 
-TAGS_TRANSPARENT = {
-    'div', 'span',
-}
-
-def filter_content(seq):
-    return [ s for s in seq if not isinstance(s, str) or not s.isspace() ]
-
 class Element:
 
     def __init__(self, tag, attrs, finish=False):
@@ -290,13 +293,9 @@ class Element:
                 children.extend(nodes)
                 weight += wc
             elif isinstance(c, str):
-                (tokens, wc) = Tokenizer().feed(c)
+                (tokens, wc) = Tokenizer.tokenize(c)
                 children.extend(tokens)
                 weight += wc
-        if not children: return ([], 0)
-        contents = filter_content(children)
-        if self.tag in TAGS_TRANSPARENT and len(contents) == 1:
-            return (contents, weight)
         if self.tag in TAGS_INLINE:
             children.append(EndTag(self))
             return (children, weight)
@@ -391,21 +390,58 @@ class Canvas:
         (self.lineno, self.maxline) = (self.maxline, self.lineno)
         return
 
+    def render_flat(self, node, indent=0):
+        def render(node):
+            if isinstance(node, StartTag):
+                if node.tag == 'a':
+                    layouter.ctrl(Ansi.UNDERLINE)
+                    layouter.add('[')
+                elif node.tag in ('b', 'strong'):
+                    layouter.ctrl(Ansi.BOLD)
+            elif isinstance(node, EndTag):
+                if node.tag == 'a':
+                    layouter.add(']')
+                    layouter.ctrl(Ansi.RESET)
+                elif node.tag in ('b', 'strong'):
+                    layouter.ctrl(Ansi.RESET)
+            elif isinstance(node, Element):
+                if node.tag == 'br':
+                    layouter.flush(force=True)
+                elif node.tag == 'img':
+                    alt = node.get('alt', 'IMG')
+                    layouter.add(f'<{alt}>')
+                else:
+                    layouter.add(f'<{node.tag}>')
+            elif isinstance(node, ElementNode):
+                for c in node.children:
+                    render(c)
+            else:
+                assert isinstance(node, str), node
+                layouter.add(node)
+        layouter = TextLayouter(self.max_width - indent)
+        render(node)
+        layouter.flush()
+
+        for tokens in layouter.rows:
+            self.print(' '*indent + ''.join(tokens))
+            self.newline()
+        return
+
     def render_texts(self, nodes, indent=0):
         layouter = TextLayouter(self.max_width - indent)
         for node in nodes:
             if isinstance(node, StartTag):
                 if node.tag == 'a':
-                    layouter.add(Ansi.UNDERLINE, 0)
+                    layouter.ctrl(Ansi.UNDERLINE)
                     layouter.add('[')
                 elif node.tag in ('b', 'strong'):
-                    layouter.add(Ansi.BOLD, 0)
+                    layouter.ctrl(Ansi.BOLD)
             elif isinstance(node, EndTag):
                 if node.tag == 'a':
                     layouter.add(']')
-                    layouter.add(Ansi.RESET, 0)
+                    layouter.ctrl(Ansi.RESET)
                 elif node.tag in ('b', 'strong'):
-                    layouter.add(Ansi.RESET, 0)
+                    layouter.ctrl(Ansi.RESET)
             elif isinstance(node, Element):
                 if node.tag == 'br':
                     layouter.flush(force=True)
@@ -424,7 +460,7 @@ class Canvas:
             self.newline()
         return
 
-    def render(self, node, opens=None, indent=0, bol=True):
+    def render_node(self, node, opens=None, indent=0, bol=True):
         assert isinstance(node, ElementNode)
         isopen = (opens is None) or (node in opens)
         if bol:
@@ -435,11 +471,6 @@ class Canvas:
             else:
                 self.print('- ')
         indent += 1
-        # contents = filter_content(node.children)
-        # if len(contents) == 1 and isinstance(contents[0], ElementNode):
-        #     self.print(f'<{node.tag}>: ')
-        #     self.render(contents[0], indent, False)
-        #     return
         self.print(f'<{node.tag}>:')
         self.newline()
         if isopen:
@@ -448,7 +479,7 @@ class Canvas:
                 if isinstance(n, ElementNode):
                     if texts:
                         self.render_texts(texts, indent=indent)
-                    self.render(n, opens, indent, True)
+                    self.render_node(n, opens, indent, True)
                     texts = []
                 else:
                     texts.append(n)
@@ -475,16 +506,18 @@ KEYMAP = {
 def main(argv):
     import getopt
     def usage():
-        print('usage: %s [-w width] url' % argv[0])
+        print('usage: %s [-w width] [-f] url' % argv[0])
         return 100
     try:
-        (opts, args) = getopt.getopt(argv[1:], 'w:')
+        (opts, args) = getopt.getopt(argv[1:], 'w:f')
     except getopt.GetoptError:
         return usage()
     user_agent = 'lofi browser'
     max_width = 80
+    flat = not sys.stdout.isatty()
     for (k, v) in opts:
         if k == '-w': max_width = int(v)
+        elif k == '-f': flat = True
     if not args:
         return usage()
     url = args.pop(0)
@@ -508,8 +541,8 @@ def main(argv):
     (content, _) = root.convert()
     assert len(content) == 1
     root = content[0]
-    if not sys.stdout.isatty():
-        canvas.render(root)
+    if flat:
+        canvas.render_flat(root)
         return
     spine = []
     root.scan(spine)
@@ -518,7 +551,7 @@ def main(argv):
     opens = set()
     while True:
         canvas.moveto(root)
-        canvas.render(root, opens.union(current.path()))
+        canvas.render_node(root, opens.union(current.path()))
         canvas.flush()
         canvas.moveto(current)
         key = getkey()
