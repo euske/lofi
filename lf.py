@@ -251,6 +251,10 @@ TAGS_INLINE = {
     'strong', 'sub', 'sup', 'tt', 'u',
 }
 
+TAGS_HEADLINE = {
+    'title', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+}
+
 class Element:
 
     def __init__(self, tag, attrs, finish=False):
@@ -410,9 +414,11 @@ class Canvas:
                 elif node.tag == 'img':
                     alt = node.get('alt', 'IMG')
                     layouter.add(f'<{alt}>')
-                else:
-                    layouter.add(f'<{node.tag}>')
+                #else:
+                #    layouter.add(f'<{node.tag}>')
             elif isinstance(node, ElementNode):
+                if node.tag in TAGS_HEADLINE:
+                    layouter.flush()
                 for c in node.children:
                     render(c)
             else:
